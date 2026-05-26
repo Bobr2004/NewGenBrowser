@@ -7,6 +7,9 @@ struct BrowserPageView: View {
     @Binding var selectedTabID: BrowserTab.ID?
     @State private var isBottomBarVisible = false
     @State private var isTabsPanelVisible = false
+    @State private var isActionsPanelVisible = false
+    @State private var browserCommand: BrowserCommand?
+    @State private var currentPageURL: URL?
 
     var body: some View {
         GeometryReader { proxy in
@@ -22,7 +25,11 @@ struct BrowserPageView: View {
     @ViewBuilder
     private var selectedPage: some View {
         if let selectedTab {
-            WebView(url: selectedTab.url)
+            WebView(
+                url: selectedTab.url,
+                command: $browserCommand,
+                currentURL: $currentPageURL
+            )
                 .ignoresSafeArea(edges: .bottom)
         } else {
             Color.clear
@@ -31,6 +38,7 @@ struct BrowserPageView: View {
 
     private func browser(in size: CGSize) -> some View {
         let tabsPanelWidth = floor(size.width * 0.4)
+        let actionsPanelWidth = floor(size.width * 0.2)
 
         return ZStack(alignment: .bottom) {
             selectedPage
@@ -53,7 +61,47 @@ struct BrowserPageView: View {
                 isVisible: $isTabsPanelVisible,
                 width: tabsPanelWidth
             )
+
+            BrowserActionsPanelOverlay(
+                isVisible: $isActionsPanelVisible,
+                width: actionsPanelWidth,
+                onBack: goBack,
+                onForward: goForward,
+                onCopyLink: copyCurrentLink,
+                onSaveApp: saveAppPlaceholder
+            )
         }
+    }
+
+    private func goBack() {
+        browserCommand = BrowserCommand(action: .back)
+    }
+
+    private func goForward() {
+        browserCommand = BrowserCommand(action: .forward)
+    }
+
+    private func copyCurrentLink() {
+        guard let url = currentPageURL ?? selectedTab?.url else {
+            return
+        }
+
+        UIPasteboard.general.string = url.absoluteString
+        print("[BrowserActions] Copied link: \(url.absoluteString)")
+    }
+
+    private func saveAppPlaceholder() {
+        print("[BrowserActions] Save app placeholder tapped.")
+    }
+}
+
+private struct BrowserCommand: Equatable {
+    let id = UUID()
+    let action: Action
+
+    enum Action {
+        case back
+        case forward
     }
 }
 
@@ -108,6 +156,135 @@ private struct TabsPanelOverlay: View {
         withAnimation(.snappy(duration: 0.2)) {
             isVisible = false
         }
+    }
+}
+
+private struct BrowserActionsPanelOverlay: View {
+    @Binding var isVisible: Bool
+
+    let width: CGFloat
+    let onBack: () -> Void
+    let onForward: () -> Void
+    let onCopyLink: () -> Void
+    let onSaveApp: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            if isVisible {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        hidePanel()
+                    }
+
+                BrowserActionsPanel(
+                    onBack: onBack,
+                    onForward: onForward,
+                    onCopyLink: onCopyLink,
+                    onSaveApp: onSaveApp
+                )
+                .frame(width: width)
+                .frame(maxHeight: .infinity)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .gesture(
+                    DragGesture(minimumDistance: 16, coordinateSpace: .local)
+                        .onEnded { value in
+                            guard value.translation.width > 40 else {
+                                return
+                            }
+
+                            hidePanel()
+                        }
+                )
+            } else {
+                RightEdgeRevealZone(isVisible: $isVisible)
+                    .ignoresSafeArea(edges: .trailing)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .animation(.snappy(duration: 0.24), value: isVisible)
+    }
+
+    private func hidePanel() {
+        withAnimation(.snappy(duration: 0.2)) {
+            isVisible = false
+        }
+    }
+}
+
+private struct BrowserActionsPanel: View {
+    let onBack: () -> Void
+    let onForward: () -> Void
+    let onCopyLink: () -> Void
+    let onSaveApp: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+
+            VStack(spacing: 16) {
+                ActionPanelButton(
+                    title: "Назад",
+                    systemImage: "chevron.left",
+                    action: onBack
+                )
+
+                ActionPanelButton(
+                    title: "Вперед",
+                    systemImage: "chevron.right",
+                    action: onForward
+                )
+            }
+
+            Spacer()
+
+            VStack(spacing: 12) {
+                ActionPanelButton(
+                    title: "Копіювати",
+                    systemImage: "doc.on.doc",
+                    action: onCopyLink
+                )
+
+                ActionPanelButton(
+                    title: "Зберегти",
+                    systemImage: "square.and.arrow.down",
+                    action: onSaveApp
+                )
+            }
+            .padding(.bottom, 22)
+        }
+        .padding(.horizontal, 8)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .overlay(alignment: .leading) {
+            Divider()
+        }
+    }
+}
+
+private struct ActionPanelButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 34, height: 34)
+
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .foregroundStyle(.primary)
+            .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
@@ -184,6 +361,83 @@ private struct LeftEdgeRevealZone: UIViewRepresentable {
 
         override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
             point.x <= edgeHitWidth
+        }
+    }
+}
+
+private struct RightEdgeRevealZone: UIViewRepresentable {
+    @Binding var isVisible: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isVisible: $isVisible)
+    }
+
+    func makeUIView(context: Context) -> EdgePanView {
+        let view = EdgePanView()
+        let recognizer = UIScreenEdgePanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleEdgePan(_:))
+        )
+        recognizer.edges = .right
+        recognizer.delegate = context.coordinator
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    func updateUIView(_ uiView: EdgePanView, context: Context) {
+        context.coordinator.isVisible = $isVisible
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var isVisible: Binding<Bool>
+
+        init(isVisible: Binding<Bool>) {
+            self.isVisible = isVisible
+        }
+
+        @objc func handleEdgePan(_ recognizer: UIScreenEdgePanGestureRecognizer) {
+            guard recognizer.state == .ended else {
+                return
+            }
+
+            let translation = recognizer.translation(in: recognizer.view)
+            let velocity = recognizer.velocity(in: recognizer.view)
+            let movedTowardCenter = translation.x < -72 || velocity.x < -320
+            let stayedHorizontal = abs(translation.y) < 90
+
+            guard movedTowardCenter && stayedHorizontal else {
+                return
+            }
+
+            withAnimation(.snappy(duration: 0.24)) {
+                isVisible.wrappedValue = true
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+
+    final class EdgePanView: UIView {
+        private let edgeHitWidth: CGFloat = 44
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .clear
+            isOpaque = false
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            point.x >= bounds.width - edgeHitWidth
         }
     }
 }
@@ -363,9 +617,11 @@ private struct TabRow: View {
 
 private struct WebView: UIViewRepresentable {
     let url: URL
+    @Binding var command: BrowserCommand?
+    @Binding var currentURL: URL?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(currentURL: $currentURL)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -384,11 +640,24 @@ private struct WebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        guard context.coordinator.loadedURL != url else {
+        if context.coordinator.loadedURL != url {
+            load(url, in: webView, context: context)
+        }
+
+        guard context.coordinator.handledCommandID != command?.id else {
             return
         }
 
-        load(url, in: webView, context: context)
+        context.coordinator.handledCommandID = command?.id
+
+        switch command?.action {
+        case .back:
+            webView.goBack()
+        case .forward:
+            webView.goForward()
+        case nil:
+            break
+        }
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -407,8 +676,15 @@ private struct WebView: UIViewRepresentable {
         static let serviceWorkerMessageName = "serviceWorkerReporter"
 
         var loadedURL: URL?
+        var handledCommandID: UUID?
+        var currentURL: Binding<URL?>
+
+        init(currentURL: Binding<URL?>) {
+            self.currentURL = currentURL
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            currentURL.wrappedValue = webView.url
             logServiceWorkerFileName(in: webView)
         }
 
