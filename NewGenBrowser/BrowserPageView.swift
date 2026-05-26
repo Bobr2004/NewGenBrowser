@@ -5,24 +5,12 @@ import WebKit
 struct BrowserPageView: View {
     @Binding var tabs: [BrowserTab]
     @Binding var selectedTabID: BrowserTab.ID?
+    @State private var isBottomBarVisible = false
+    @State private var isTabsPanelVisible = false
 
     var body: some View {
         GeometryReader { proxy in
-            if proxy.size.width > proxy.size.height {
-                let sidebarWidth = floor(proxy.size.width * 0.5)
-
-                HStack(spacing: 0) {
-                    BrowserTabsSidebar(tabs: $tabs, selectedTabID: $selectedTabID)
-                        .frame(width: sidebarWidth)
-
-                    Divider()
-
-                    selectedPage
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                selectedPage
-            }
+            browser(in: proxy.size)
         }
         .background(.background)
     }
@@ -40,11 +28,226 @@ struct BrowserPageView: View {
             Color.clear
         }
     }
+
+    private func browser(in size: CGSize) -> some View {
+        let tabsPanelWidth = floor(size.width * 0.4)
+
+        return ZStack(alignment: .bottom) {
+            selectedPage
+
+            if isBottomBarVisible {
+                BrowserActionBar()
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            BottomRightRevealZone(
+                isBottomBarVisible: $isBottomBarVisible
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+
+            TabsPanelOverlay(
+                tabs: $tabs,
+                selectedTabID: $selectedTabID,
+                isVisible: $isTabsPanelVisible,
+                width: tabsPanelWidth
+            )
+        }
+    }
+}
+
+private struct TabsPanelOverlay: View {
+    @Binding var tabs: [BrowserTab]
+    @Binding var selectedTabID: BrowserTab.ID?
+    @Binding var isVisible: Bool
+
+    let width: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            if isVisible {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            isVisible = false
+                        }
+                    }
+
+                BrowserTabsSidebar(
+                    tabs: $tabs,
+                    selectedTabID: $selectedTabID,
+                    onSelectTab: hidePanel
+                )
+                    .frame(width: width)
+                    .frame(maxHeight: .infinity)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .gesture(
+                        DragGesture(minimumDistance: 16, coordinateSpace: .local)
+                            .onEnded { value in
+                                guard value.translation.width < -40 else {
+                                    return
+                                }
+
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    isVisible = false
+                                }
+                            }
+                    )
+            } else {
+                LeftEdgeRevealZone(isVisible: $isVisible)
+                    .ignoresSafeArea(edges: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .animation(.snappy(duration: 0.24), value: isVisible)
+    }
+
+    private func hidePanel() {
+        withAnimation(.snappy(duration: 0.2)) {
+            isVisible = false
+        }
+    }
+}
+
+private struct LeftEdgeRevealZone: UIViewRepresentable {
+    @Binding var isVisible: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isVisible: $isVisible)
+    }
+
+    func makeUIView(context: Context) -> EdgePanView {
+        let view = EdgePanView()
+        let recognizer = UIScreenEdgePanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleEdgePan(_:))
+        )
+        recognizer.edges = .left
+        recognizer.delegate = context.coordinator
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    func updateUIView(_ uiView: EdgePanView, context: Context) {
+        context.coordinator.isVisible = $isVisible
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var isVisible: Binding<Bool>
+
+        init(isVisible: Binding<Bool>) {
+            self.isVisible = isVisible
+        }
+
+        @objc func handleEdgePan(_ recognizer: UIScreenEdgePanGestureRecognizer) {
+            guard recognizer.state == .ended else {
+                return
+            }
+
+            let translation = recognizer.translation(in: recognizer.view)
+            let velocity = recognizer.velocity(in: recognizer.view)
+            let movedTowardCenter = translation.x > 72 || velocity.x > 320
+            let stayedHorizontal = abs(translation.y) < 90
+
+            guard movedTowardCenter && stayedHorizontal else {
+                return
+            }
+
+            withAnimation(.snappy(duration: 0.24)) {
+                isVisible.wrappedValue = true
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+
+    final class EdgePanView: UIView {
+        private let edgeHitWidth: CGFloat = 44
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .clear
+            isOpaque = false
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            point.x <= edgeHitWidth
+        }
+    }
+}
+
+private struct BrowserActionBar: View {
+    var body: some View {
+        HStack(spacing: 18) {
+            Image(systemName: "chevron.left")
+            Image(systemName: "chevron.right")
+            Image(systemName: "arrow.clockwise")
+            Spacer(minLength: 0)
+            Image(systemName: "square.on.square")
+        }
+        .font(.body.weight(.semibold))
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 18)
+        .frame(height: 54)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(alignment: .topTrailing) {
+            Image(systemName: "sparkles")
+                .font(.caption.weight(.bold))
+                .padding(8)
+                .foregroundStyle(.secondary)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+    }
+}
+
+private struct BottomRightRevealZone: View {
+    @Binding var isBottomBarVisible: Bool
+
+    var body: some View {
+        Color.clear
+            .frame(width: 96, height: 96)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 18, coordinateSpace: .local)
+                    .onEnded { value in
+                        guard shouldRevealBar(for: value) else {
+                            return
+                        }
+
+                        withAnimation(.snappy(duration: 0.24)) {
+                            isBottomBarVisible = true
+                        }
+                    }
+            )
+    }
+
+    private func shouldRevealBar(for value: DragGesture.Value) -> Bool {
+        let translation = value.translation
+
+        let movedLeft = translation.width < -44
+        let movedUp = translation.height < -26
+
+        return movedLeft && movedUp
+    }
 }
 
 private struct BrowserTabsSidebar: View {
     @Binding var tabs: [BrowserTab]
     @Binding var selectedTabID: BrowserTab.ID?
+    let onSelectTab: () -> Void
 
     @State private var newTabAddress = ""
     @State private var errorMessage: String?
@@ -89,6 +292,7 @@ private struct BrowserTabsSidebar: View {
                             isSelected: tab.id == selectedTabID
                         ) {
                             selectedTabID = tab.id
+                            onSelectTab()
                         }
                     }
                 }
@@ -109,6 +313,7 @@ private struct BrowserTabsSidebar: View {
         let tab = BrowserTab(url: url)
         tabs.append(tab)
         selectedTabID = tab.id
+        onSelectTab()
         newTabAddress = ""
         errorMessage = nil
     }
@@ -168,7 +373,7 @@ private struct WebView: UIViewRepresentable {
         configuration.allowsInlineMediaPlayback = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.allowsBackForwardNavigationGestures = true
+        webView.allowsBackForwardNavigationGestures = false
         load(url, in: webView, context: context)
         return webView
     }
