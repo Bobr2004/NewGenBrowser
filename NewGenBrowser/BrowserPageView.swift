@@ -503,40 +503,63 @@ private struct BrowserTabsSidebar: View {
     @Binding var selectedTabID: BrowserTab.ID?
     let onSelectTab: () -> Void
 
+    @State private var mode: SidebarMode = .tabs
     @State private var newTabAddress = ""
     @State private var errorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    mode = mode == .apps ? .tabs : .apps
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: mode == .apps ? "chevron.left" : "square.grid.3x3")
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(mode == .apps ? "Вкладки" : "Застосунки")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 38)
+                .foregroundStyle(.primary)
+                .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+
             HStack {
-                Text("Tabs")
+                Text(mode == .apps ? "Застосунки" : "Tabs")
                     .font(.headline)
 
                 Spacer()
 
-                Button(action: openNewTab) {
-                    Image(systemName: "plus")
-                        .font(.headline)
-                }
-                .buttonStyle(.borderless)
-                .disabled(newTabAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("New tab URL", text: $newTabAddress)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(openNewTab)
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+                if mode == .tabs {
+                    Button(action: openNewTab) {
+                        Image(systemName: "plus")
+                            .font(.headline)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(newTabAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+
+            if mode == .tabs {
+                tabsList
+            } else {
+                SavedAppsGrid(apps: MockSavedApp.samples)
+            }
+        }
+        .padding(16)
+        .background(Color(uiColor: .secondarySystemBackground))
+    }
+
+    private var tabsList: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            newTabForm
 
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -554,8 +577,24 @@ private struct BrowserTabsSidebar: View {
             }
             .scrollIndicators(.hidden)
         }
-        .padding(16)
-        .background(Color(uiColor: .secondarySystemBackground))
+    }
+
+    private var newTabForm: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("New tab URL", text: $newTabAddress)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(openNewTab)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        }
     }
 
     private func openNewTab() {
@@ -570,6 +609,76 @@ private struct BrowserTabsSidebar: View {
         onSelectTab()
         newTabAddress = ""
         errorMessage = nil
+    }
+
+    private enum SidebarMode {
+        case tabs
+        case apps
+    }
+}
+
+private struct MockSavedApp: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let systemImage: String
+
+    static let samples = [
+        MockSavedApp(title: "YouTube", subtitle: "youtube.com", systemImage: "play.rectangle.fill"),
+        MockSavedApp(title: "Maps", subtitle: "maps.google.com", systemImage: "map.fill"),
+        MockSavedApp(title: "Mail", subtitle: "mail.google.com", systemImage: "envelope.fill"),
+        MockSavedApp(title: "Docs", subtitle: "docs.google.com", systemImage: "doc.text.fill"),
+        MockSavedApp(title: "Calendar", subtitle: "calendar.google.com", systemImage: "calendar")
+    ]
+}
+
+private struct SavedAppsGrid: View {
+    let apps: [MockSavedApp]
+
+    private let columns = Array(
+        repeating: GridItem(.flexible(minimum: 42), spacing: 8),
+        count: 3
+    )
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(apps) { app in
+                    SavedAppCell(app: app)
+                }
+            }
+            .padding(.bottom, 12)
+        }
+        .scrollIndicators(.hidden)
+    }
+}
+
+private struct SavedAppCell: View {
+    let app: MockSavedApp
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: app.systemImage)
+                .font(.title3.weight(.semibold))
+                .frame(width: 34, height: 34)
+                .foregroundStyle(.white)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+
+            Text(app.title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text(app.subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 9)
+        .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
