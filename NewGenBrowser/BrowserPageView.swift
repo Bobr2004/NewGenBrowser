@@ -371,9 +371,14 @@ private struct WebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
+        configuration.userContentController.add(
+            context.coordinator,
+            name: Coordinator.serviceWorkerMessageName
+        )
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = false
+        webView.navigationDelegate = context.coordinator
         load(url, in: webView, context: context)
         return webView
     }
@@ -386,13 +391,103 @@ private struct WebView: UIViewRepresentable {
         load(url, in: webView, context: context)
     }
 
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.navigationDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: Coordinator.serviceWorkerMessageName
+        )
+    }
+
     private func load(_ url: URL, in webView: WKWebView, context: Context) {
         context.coordinator.loadedURL = url
         webView.load(URLRequest(url: url))
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        static let serviceWorkerMessageName = "serviceWorkerReporter"
+
         var loadedURL: URL?
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            logServiceWorkerFileName(in: webView)
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard message.name == Self.serviceWorkerMessageName else {
+                return
+            }
+
+            guard let payload = message.body as? [String: Any] else {
+                print("[ServiceWorker] Unexpected payload: \(message.body)")
+                return
+            }
+
+            if let error = payload["error"] as? String {
+                print("[ServiceWorker] Failed to inspect worker: \(error)")
+                return
+            }
+
+            guard payload["supported"] as? Bool == true else {
+                print("[ServiceWorker] navigator.serviceWorker is unavailable on this page.")
+                return
+            }
+
+            guard let fileNames = payload["fileNames"] as? [String], fileNames.isEmpty == false else {
+                print("[ServiceWorker] No registered service worker found.")
+                return
+            }
+
+            for fileName in fileNames {
+                print("[ServiceWorker] Worker file: \(fileName)")
+            }
+        }
+
+        private func logServiceWorkerFileName(in webView: WKWebView) {
+            let script = """
+            (() => {
+                const report = (payload) => {
+                    window.webkit.messageHandlers.\(Self.serviceWorkerMessageName).postMessage(payload);
+                };
+
+                if (!("serviceWorker" in navigator)) {
+                    report({ supported: false });
+                    return;
+                }
+
+                navigator.serviceWorker.getRegistrations()
+                    .then((registrations) => {
+                        const urls = registrations.flatMap((registration) => {
+                            return [
+                                registration.active,
+                                registration.waiting,
+                                registration.installing
+                            ]
+                                .filter(Boolean)
+                                .map((worker) => worker.scriptURL);
+                        });
+
+                        const fileNames = [...new Set(urls)].map((url) => {
+                            const path = new URL(url, window.location.href).pathname;
+                            return path.split("/").filter(Boolean).pop() || url;
+                        });
+
+                        report({ supported: true, fileNames });
+                    })
+                    .catch((error) => {
+                        report({ supported: true, error: String(error) });
+                    });
+            })();
+            """
+
+            webView.evaluateJavaScript(script) { _, error in
+                if let error {
+                    print("[ServiceWorker] JavaScript evaluation failed: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 }
 
