@@ -5,6 +5,8 @@ struct NewGenBrowserApp: App {
     var body: some Scene {
         WindowGroup {
             BrowserRootView()
+                .preferredColorScheme(.dark)
+                .tint(.cyan)
         }
     }
 }

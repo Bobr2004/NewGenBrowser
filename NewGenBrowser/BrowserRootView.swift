@@ -19,7 +19,3 @@ struct BrowserRootView: View {
         .animation(.snappy, value: tabs.isEmpty)
     }
 }
-
-#Preview {
-    BrowserRootView()
-}

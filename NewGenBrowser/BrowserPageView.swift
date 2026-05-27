@@ -42,10 +42,13 @@ struct BrowserPageView: View {
     }
 
     private func browser(in size: CGSize) -> some View {
-        let tabsPanelWidth = floor(size.width * 0.4)
-        let actionsPanelWidth = floor(size.width * 0.2)
+        let tabsPanelWidth = min(max(floor(size.width * 0.78), 286), size.width - 54)
+        let actionsPanelWidth = min(max(floor(size.width * 0.22), 78), 96)
 
         return ZStack(alignment: .bottom) {
+            BrowserStyle.browserBackground
+                .ignoresSafeArea()
+
             selectedPage
 
             TabsPanelOverlay(
@@ -153,6 +156,26 @@ private struct PinnedPage: Identifiable, Equatable {
     let url: URL
 }
 
+private enum BrowserStyle {
+    static let browserBackground = Color(red: 0.025, green: 0.03, blue: 0.04)
+    static let panelBase = Color(red: 0.065, green: 0.075, blue: 0.09)
+    static let elevatedSurface = Color.white.opacity(0.075)
+    static let selectedSurface = Color.cyan.opacity(0.17)
+    static let hairline = Color.white.opacity(0.105)
+    static let mutedText = Color.white.opacity(0.55)
+
+    static var panelGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.105, green: 0.12, blue: 0.145),
+                Color(red: 0.055, green: 0.062, blue: 0.078)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+}
+
 private struct TabsPanelOverlay: View {
     @Binding var tabs: [BrowserTab]
     @Binding var selectedTabID: BrowserTab.ID?
@@ -166,7 +189,7 @@ private struct TabsPanelOverlay: View {
     var body: some View {
         ZStack(alignment: .leading) {
             if isVisible {
-                Color.black.opacity(0.001)
+                Color.black.opacity(0.34)
                     .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation(.snappy(duration: 0.2)) {
@@ -184,6 +207,8 @@ private struct TabsPanelOverlay: View {
                 )
                     .frame(width: width)
                     .frame(maxHeight: .infinity)
+                    .clipShape(.rect(bottomTrailingRadius: 28, topTrailingRadius: 28))
+                    .shadow(color: .black.opacity(0.34), radius: 32, x: 16)
                     .transition(.move(edge: .leading).combined(with: .opacity))
                     .gesture(
                         DragGesture(minimumDistance: 16, coordinateSpace: .local)
@@ -226,7 +251,7 @@ private struct BrowserActionsPanelOverlay: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             if isVisible {
-                Color.black.opacity(0.001)
+                Color.black.opacity(0.26)
                     .ignoresSafeArea()
                     .onTapGesture {
                         hidePanel()
@@ -241,6 +266,8 @@ private struct BrowserActionsPanelOverlay: View {
                 )
                 .frame(width: width)
                 .frame(maxHeight: .infinity)
+                .clipShape(.rect(topLeadingRadius: 26, bottomLeadingRadius: 26))
+                .shadow(color: .black.opacity(0.34), radius: 28, x: -14)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .gesture(
                     DragGesture(minimumDistance: 16, coordinateSpace: .local)
@@ -279,15 +306,15 @@ private struct BrowserActionsPanel: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 16) {
+            VStack(spacing: 14) {
                 ActionPanelButton(
-                    title: "Назад",
+                    title: "Back",
                     systemImage: "chevron.left",
                     action: onBack
                 )
 
                 ActionPanelButton(
-                    title: "Вперед",
+                    title: "Forward",
                     systemImage: "chevron.right",
                     action: onForward
                 )
@@ -295,25 +322,29 @@ private struct BrowserActionsPanel: View {
 
             Spacer()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 ActionPanelButton(
-                    title: "Копіювати",
+                    title: "Copy",
                     systemImage: "doc.on.doc",
                     action: onCopyLink
                 )
 
                 ActionPanelButton(
-                    title: hasServiceWorker ? "Завантажити" : "Закріпити",
+                    title: hasServiceWorker ? "Install" : "Pin",
                     systemImage: hasServiceWorker ? "arrow.down.circle" : "pin",
                     action: onInstallOrPin
                 )
             }
-            .padding(.bottom, 22)
+            .padding(.bottom, 26)
         }
-        .padding(.horizontal, 8)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .padding(.horizontal, 10)
+        .background {
+            BrowserStyle.panelGradient
+        }
         .overlay(alignment: .leading) {
-            Divider()
+            Rectangle()
+                .fill(BrowserStyle.hairline)
+                .frame(width: 1)
         }
     }
 }
@@ -325,20 +356,15 @@ private struct ActionPanelButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.title3.weight(.semibold))
-                    .frame(width: 34, height: 34)
-
-                Text(title)
-                    .font(.caption2.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .foregroundStyle(.primary)
-            .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            Image(systemName: systemImage)
+                .font(.title3.weight(.semibold))
+                .frame(width: 48, height: 48)
+                .foregroundStyle(.white)
+                .background(BrowserStyle.elevatedSurface, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(BrowserStyle.hairline, lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -521,34 +547,46 @@ private struct BrowserTabsSidebar: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: mode == .apps ? "chevron.left" : "square.grid.3x3")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline.weight(.bold))
+                        .frame(width: 26, height: 26)
+                        .foregroundStyle(.cyan)
+                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 
-                    Text(mode == .apps ? "Вкладки" : "Застосунки")
+                    Text(mode == .apps ? "Tabs" : "Apps")
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
 
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 38)
-                .foregroundStyle(.primary)
-                .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .frame(height: 46)
+                .foregroundStyle(.white)
+                .background(BrowserStyle.elevatedSurface, in: RoundedRectangle(cornerRadius: 16))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(BrowserStyle.hairline, lineWidth: 1)
+                }
             }
             .buttonStyle(.plain)
 
             HStack {
-                Text(mode == .apps ? "Застосунки" : "Tabs")
-                    .font(.headline)
+                Text(mode == .apps ? "Apps" : "Tabs")
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                    .foregroundStyle(.white)
 
                 Spacer()
 
                 if mode == .tabs {
                     Button(action: openNewTab) {
                         Image(systemName: "plus")
-                            .font(.headline)
+                            .font(.headline.weight(.bold))
+                            .frame(width: 34, height: 34)
+                            .foregroundStyle(.black)
+                            .background(.cyan, in: Circle())
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
                     .disabled(newTabAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .opacity(newTabAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.36 : 1)
                 }
             }
 
@@ -561,8 +599,16 @@ private struct BrowserTabsSidebar: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 18)
+        .background {
+            BrowserStyle.panelGradient
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(BrowserStyle.hairline)
+                .frame(width: 1)
+        }
     }
 
     private var tabsList: some View {
@@ -593,9 +639,9 @@ private struct BrowserTabsSidebar: View {
 
     private var pinnedPagesList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Закріплені")
+            Text("Pinned")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BrowserStyle.mutedText)
 
             LazyVStack(spacing: 8) {
                 ForEach(pinnedPages) { page in
@@ -615,13 +661,21 @@ private struct BrowserTabsSidebar: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.go)
-                .textFieldStyle(.roundedBorder)
+                .foregroundStyle(.white)
+                .tint(.cyan)
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .background(BrowserStyle.elevatedSurface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(BrowserStyle.hairline, lineWidth: 1)
+                }
                 .onSubmit(openNewTab)
 
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.red.opacity(0.9))
             }
         }
     }
@@ -671,27 +725,32 @@ private struct PinnedPageRow: View {
             HStack(spacing: 10) {
                 Image(systemName: "pin.fill")
                     .font(.body.weight(.semibold))
-                    .frame(width: 28, height: 28)
-                    .foregroundStyle(.white)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7))
+                    .frame(width: 32, height: 32)
+                    .foregroundStyle(.black)
+                    .background(.cyan, in: RoundedRectangle(cornerRadius: 10))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(page.title)
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
                         .lineLimit(1)
 
                     Text(page.subtitle)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrowserStyle.mutedText)
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            .background(BrowserStyle.elevatedSurface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(BrowserStyle.hairline, lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
     }
@@ -702,7 +761,7 @@ private struct SavedAppsGrid: View {
     let onSelectApp: (MockSavedApp) -> Void
 
     private let columns = Array(
-        repeating: GridItem(.flexible(minimum: 42), spacing: 8),
+        repeating: GridItem(.flexible(minimum: 62), spacing: 10),
         count: 3
     )
 
@@ -730,26 +789,30 @@ private struct SavedAppCell: View {
             VStack(spacing: 6) {
                 Image(systemName: app.systemImage)
                     .font(.title3.weight(.semibold))
-                    .frame(width: 34, height: 34)
-                    .foregroundStyle(.white)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+                    .frame(width: 42, height: 42)
+                    .foregroundStyle(.black)
+                    .background(.cyan, in: RoundedRectangle(cornerRadius: 12))
 
                 Text(app.title)
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
 
                 Text(app.subtitle)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrowserStyle.mutedText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 4)
-            .padding(.vertical, 9)
-            .foregroundStyle(.primary)
-            .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.vertical, 12)
+            .background(BrowserStyle.elevatedSurface, in: RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(BrowserStyle.hairline, lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
     }
@@ -765,32 +828,34 @@ private struct TabRow: View {
             HStack(spacing: 10) {
                 Image(systemName: "globe")
                     .font(.body.weight(.semibold))
-                    .frame(width: 28, height: 28)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 7))
+                    .frame(width: 32, height: 32)
+                    .foregroundStyle(isSelected ? .black : .cyan)
+                    .background(isSelected ? .cyan : .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(tab.title)
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
                         .lineLimit(1)
 
                     Text(tab.subtitle)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrowserStyle.mutedText)
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                isSelected ? Color.accentColor.opacity(0.16) : Color(uiColor: .tertiarySystemBackground),
-                in: RoundedRectangle(cornerRadius: 8)
+                isSelected ? BrowserStyle.selectedSurface : BrowserStyle.elevatedSurface,
+                in: RoundedRectangle(cornerRadius: 14)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.45) : .clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(isSelected ? Color.cyan.opacity(0.34) : BrowserStyle.hairline, lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
@@ -970,14 +1035,4 @@ private struct WebView: UIViewRepresentable {
             }
         }
     }
-}
-
-#Preview {
-    BrowserPageView(
-        tabs: .constant([
-            BrowserTab(url: URL(string: "https://example.com")!),
-            BrowserTab(url: URL(string: "https://apple.com")!)
-        ]),
-        selectedTabID: .constant(nil)
-    )
 }
