@@ -5,11 +5,14 @@ import WebKit
 struct BrowserPageView: View {
     @Binding var tabs: [BrowserTab]
     @Binding var selectedTabID: BrowserTab.ID?
-    @State private var isBottomBarVisible = false
     @State private var isTabsPanelVisible = false
     @State private var isActionsPanelVisible = false
     @State private var browserCommand: BrowserCommand?
     @State private var currentPageURL: URL?
+    @State private var currentPageTitle: String?
+    @State private var currentPageHasServiceWorker = false
+    @State private var pinnedPages: [PinnedPage] = []
+    @State private var savedApps = MockSavedApp.samples
 
     var body: some View {
         GeometryReader { proxy in
@@ -28,7 +31,9 @@ struct BrowserPageView: View {
             WebView(
                 url: selectedTab.url,
                 command: $browserCommand,
-                currentURL: $currentPageURL
+                currentURL: $currentPageURL,
+                currentTitle: $currentPageTitle,
+                hasServiceWorker: $currentPageHasServiceWorker
             )
                 .ignoresSafeArea(edges: .bottom)
         } else {
@@ -43,23 +48,14 @@ struct BrowserPageView: View {
         return ZStack(alignment: .bottom) {
             selectedPage
 
-            if isBottomBarVisible {
-                BrowserActionBar()
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 14)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            BottomRightRevealZone(
-                isBottomBarVisible: $isBottomBarVisible
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-
             TabsPanelOverlay(
                 tabs: $tabs,
                 selectedTabID: $selectedTabID,
+                pinnedPages: $pinnedPages,
+                savedApps: $savedApps,
                 isVisible: $isTabsPanelVisible,
-                width: tabsPanelWidth
+                width: tabsPanelWidth,
+                onOpenURL: openURL
             )
 
             BrowserActionsPanelOverlay(
@@ -68,7 +64,8 @@ struct BrowserPageView: View {
                 onBack: goBack,
                 onForward: goForward,
                 onCopyLink: copyCurrentLink,
-                onSaveApp: saveAppPlaceholder
+                hasServiceWorker: currentPageHasServiceWorker,
+                onInstallOrPin: installOrPinCurrentPage
             )
         }
     }
@@ -90,8 +87,52 @@ struct BrowserPageView: View {
         print("[BrowserActions] Copied link: \(url.absoluteString)")
     }
 
-    private func saveAppPlaceholder() {
-        print("[BrowserActions] Save app placeholder tapped.")
+    private func installOrPinCurrentPage() {
+        guard let url = currentPageURL ?? selectedTab?.url else {
+            return
+        }
+
+        let title = normalizedPageTitle(for: url)
+
+        if currentPageHasServiceWorker {
+            let app = MockSavedApp(title: title, subtitle: url.host(percentEncoded: false) ?? url.absoluteString, systemImage: "app.badge.fill", url: url)
+            guard savedApps.contains(where: { $0.url == url }) == false else {
+                print("[BrowserActions] App is already saved: \(url.absoluteString)")
+                return
+            }
+
+            savedApps.append(app)
+            print("[BrowserActions] Saved app: \(title)")
+        } else {
+            let page = PinnedPage(title: title, subtitle: url.host(percentEncoded: false) ?? url.absoluteString, url: url)
+            guard pinnedPages.contains(where: { $0.url == url }) == false else {
+                print("[BrowserActions] Page is already pinned: \(url.absoluteString)")
+                return
+            }
+
+            pinnedPages.insert(page, at: 0)
+            print("[BrowserActions] Pinned page: \(title)")
+        }
+    }
+
+    private func normalizedPageTitle(for url: URL) -> String {
+        let trimmedTitle = currentPageTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedTitle, trimmedTitle.isEmpty == false {
+            return trimmedTitle
+        }
+
+        return url.host(percentEncoded: false) ?? url.absoluteString
+    }
+
+    private func openURL(_ url: URL) {
+        if let existingTab = tabs.first(where: { $0.url == url }) {
+            selectedTabID = existingTab.id
+            return
+        }
+
+        let tab = BrowserTab(url: url)
+        tabs.append(tab)
+        selectedTabID = tab.id
     }
 }
 
@@ -105,12 +146,22 @@ private struct BrowserCommand: Equatable {
     }
 }
 
+private struct PinnedPage: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let url: URL
+}
+
 private struct TabsPanelOverlay: View {
     @Binding var tabs: [BrowserTab]
     @Binding var selectedTabID: BrowserTab.ID?
+    @Binding var pinnedPages: [PinnedPage]
+    @Binding var savedApps: [MockSavedApp]
     @Binding var isVisible: Bool
 
     let width: CGFloat
+    let onOpenURL: (URL) -> Void
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -126,6 +177,9 @@ private struct TabsPanelOverlay: View {
                 BrowserTabsSidebar(
                     tabs: $tabs,
                     selectedTabID: $selectedTabID,
+                    pinnedPages: $pinnedPages,
+                    savedApps: $savedApps,
+                    onOpenURL: onOpenURL,
                     onSelectTab: hidePanel
                 )
                     .frame(width: width)
@@ -166,7 +220,8 @@ private struct BrowserActionsPanelOverlay: View {
     let onBack: () -> Void
     let onForward: () -> Void
     let onCopyLink: () -> Void
-    let onSaveApp: () -> Void
+    let hasServiceWorker: Bool
+    let onInstallOrPin: () -> Void
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -181,7 +236,8 @@ private struct BrowserActionsPanelOverlay: View {
                     onBack: onBack,
                     onForward: onForward,
                     onCopyLink: onCopyLink,
-                    onSaveApp: onSaveApp
+                    hasServiceWorker: hasServiceWorker,
+                    onInstallOrPin: onInstallOrPin
                 )
                 .frame(width: width)
                 .frame(maxHeight: .infinity)
@@ -216,7 +272,8 @@ private struct BrowserActionsPanel: View {
     let onBack: () -> Void
     let onForward: () -> Void
     let onCopyLink: () -> Void
-    let onSaveApp: () -> Void
+    let hasServiceWorker: Bool
+    let onInstallOrPin: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -246,9 +303,9 @@ private struct BrowserActionsPanel: View {
                 )
 
                 ActionPanelButton(
-                    title: "Зберегти",
-                    systemImage: "square.and.arrow.down",
-                    action: onSaveApp
+                    title: hasServiceWorker ? "Завантажити" : "Закріпити",
+                    systemImage: hasServiceWorker ? "arrow.down.circle" : "pin",
+                    action: onInstallOrPin
                 )
             }
             .padding(.bottom, 22)
@@ -442,65 +499,13 @@ private struct RightEdgeRevealZone: UIViewRepresentable {
     }
 }
 
-private struct BrowserActionBar: View {
-    var body: some View {
-        HStack(spacing: 18) {
-            Image(systemName: "chevron.left")
-            Image(systemName: "chevron.right")
-            Image(systemName: "arrow.clockwise")
-            Spacer(minLength: 0)
-            Image(systemName: "square.on.square")
-        }
-        .font(.body.weight(.semibold))
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 18)
-        .frame(height: 54)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(alignment: .topTrailing) {
-            Image(systemName: "sparkles")
-                .font(.caption.weight(.bold))
-                .padding(8)
-                .foregroundStyle(.secondary)
-        }
-        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
-    }
-}
-
-private struct BottomRightRevealZone: View {
-    @Binding var isBottomBarVisible: Bool
-
-    var body: some View {
-        Color.clear
-            .frame(width: 96, height: 96)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 18, coordinateSpace: .local)
-                    .onEnded { value in
-                        guard shouldRevealBar(for: value) else {
-                            return
-                        }
-
-                        withAnimation(.snappy(duration: 0.24)) {
-                            isBottomBarVisible = true
-                        }
-                    }
-            )
-    }
-
-    private func shouldRevealBar(for value: DragGesture.Value) -> Bool {
-        let translation = value.translation
-
-        let movedLeft = translation.width < -44
-        let movedUp = translation.height < -26
-
-        return movedLeft && movedUp
-    }
-}
-
 private struct BrowserTabsSidebar: View {
     @Binding var tabs: [BrowserTab]
     @Binding var selectedTabID: BrowserTab.ID?
+    @Binding var pinnedPages: [PinnedPage]
+    @Binding var savedApps: [MockSavedApp]
+
+    let onOpenURL: (URL) -> Void
     let onSelectTab: () -> Void
 
     @State private var mode: SidebarMode = .tabs
@@ -550,7 +555,10 @@ private struct BrowserTabsSidebar: View {
             if mode == .tabs {
                 tabsList
             } else {
-                SavedAppsGrid(apps: MockSavedApp.samples)
+                SavedAppsGrid(apps: savedApps) { app in
+                    onOpenURL(app.url)
+                    onSelectTab()
+                }
             }
         }
         .padding(16)
@@ -559,6 +567,10 @@ private struct BrowserTabsSidebar: View {
 
     private var tabsList: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if pinnedPages.isEmpty == false {
+                pinnedPagesList
+            }
+
             newTabForm
 
             ScrollView {
@@ -576,6 +588,23 @@ private struct BrowserTabsSidebar: View {
                 .padding(.bottom, 12)
             }
             .scrollIndicators(.hidden)
+        }
+    }
+
+    private var pinnedPagesList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Закріплені")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVStack(spacing: 8) {
+                ForEach(pinnedPages) { page in
+                    PinnedPageRow(page: page) {
+                        onOpenURL(page.url)
+                        onSelectTab()
+                    }
+                }
+            }
         }
     }
 
@@ -622,18 +651,55 @@ private struct MockSavedApp: Identifiable {
     let title: String
     let subtitle: String
     let systemImage: String
+    let url: URL
 
     static let samples = [
-        MockSavedApp(title: "YouTube", subtitle: "youtube.com", systemImage: "play.rectangle.fill"),
-        MockSavedApp(title: "Maps", subtitle: "maps.google.com", systemImage: "map.fill"),
-        MockSavedApp(title: "Mail", subtitle: "mail.google.com", systemImage: "envelope.fill"),
-        MockSavedApp(title: "Docs", subtitle: "docs.google.com", systemImage: "doc.text.fill"),
-        MockSavedApp(title: "Calendar", subtitle: "calendar.google.com", systemImage: "calendar")
+        MockSavedApp(title: "YouTube", subtitle: "youtube.com", systemImage: "play.rectangle.fill", url: URL(string: "https://youtube.com")!),
+        MockSavedApp(title: "Maps", subtitle: "maps.google.com", systemImage: "map.fill", url: URL(string: "https://maps.google.com")!),
+        MockSavedApp(title: "Mail", subtitle: "mail.google.com", systemImage: "envelope.fill", url: URL(string: "https://mail.google.com")!),
+        MockSavedApp(title: "Docs", subtitle: "docs.google.com", systemImage: "doc.text.fill", url: URL(string: "https://docs.google.com")!),
+        MockSavedApp(title: "Calendar", subtitle: "calendar.google.com", systemImage: "calendar", url: URL(string: "https://calendar.google.com")!)
     ]
+}
+
+private struct PinnedPageRow: View {
+    let page: PinnedPage
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                Image(systemName: "pin.fill")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(.white)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(page.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+
+                    Text(page.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 private struct SavedAppsGrid: View {
     let apps: [MockSavedApp]
+    let onSelectApp: (MockSavedApp) -> Void
 
     private let columns = Array(
         repeating: GridItem(.flexible(minimum: 42), spacing: 8),
@@ -644,7 +710,9 @@ private struct SavedAppsGrid: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(apps) { app in
-                    SavedAppCell(app: app)
+                    SavedAppCell(app: app) {
+                        onSelectApp(app)
+                    }
                 }
             }
             .padding(.bottom, 12)
@@ -655,30 +723,35 @@ private struct SavedAppsGrid: View {
 
 private struct SavedAppCell: View {
     let app: MockSavedApp
+    let onSelect: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: app.systemImage)
-                .font(.title3.weight(.semibold))
-                .frame(width: 34, height: 34)
-                .foregroundStyle(.white)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+        Button(action: onSelect) {
+            VStack(spacing: 6) {
+                Image(systemName: app.systemImage)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 34, height: 34)
+                    .foregroundStyle(.white)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
 
-            Text(app.title)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                Text(app.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
-            Text(app.subtitle)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+                Text(app.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 9)
+            .foregroundStyle(.primary)
+            .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 9)
-        .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .buttonStyle(.plain)
     }
 }
 
@@ -728,9 +801,15 @@ private struct WebView: UIViewRepresentable {
     let url: URL
     @Binding var command: BrowserCommand?
     @Binding var currentURL: URL?
+    @Binding var currentTitle: String?
+    @Binding var hasServiceWorker: Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(currentURL: $currentURL)
+        Coordinator(
+            currentURL: $currentURL,
+            currentTitle: $currentTitle,
+            hasServiceWorker: $hasServiceWorker
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -778,6 +857,9 @@ private struct WebView: UIViewRepresentable {
 
     private func load(_ url: URL, in webView: WKWebView, context: Context) {
         context.coordinator.loadedURL = url
+        context.coordinator.currentURL.wrappedValue = url
+        context.coordinator.currentTitle.wrappedValue = nil
+        context.coordinator.hasServiceWorker.wrappedValue = false
         webView.load(URLRequest(url: url))
     }
 
@@ -787,13 +869,22 @@ private struct WebView: UIViewRepresentable {
         var loadedURL: URL?
         var handledCommandID: UUID?
         var currentURL: Binding<URL?>
+        var currentTitle: Binding<String?>
+        var hasServiceWorker: Binding<Bool>
 
-        init(currentURL: Binding<URL?>) {
+        init(
+            currentURL: Binding<URL?>,
+            currentTitle: Binding<String?>,
+            hasServiceWorker: Binding<Bool>
+        ) {
             self.currentURL = currentURL
+            self.currentTitle = currentTitle
+            self.hasServiceWorker = hasServiceWorker
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             currentURL.wrappedValue = webView.url
+            currentTitle.wrappedValue = webView.title
             logServiceWorkerFileName(in: webView)
         }
 
@@ -811,19 +902,24 @@ private struct WebView: UIViewRepresentable {
             }
 
             if let error = payload["error"] as? String {
+                hasServiceWorker.wrappedValue = false
                 print("[ServiceWorker] Failed to inspect worker: \(error)")
                 return
             }
 
             guard payload["supported"] as? Bool == true else {
+                hasServiceWorker.wrappedValue = false
                 print("[ServiceWorker] navigator.serviceWorker is unavailable on this page.")
                 return
             }
 
             guard let fileNames = payload["fileNames"] as? [String], fileNames.isEmpty == false else {
+                hasServiceWorker.wrappedValue = false
                 print("[ServiceWorker] No registered service worker found.")
                 return
             }
+
+            hasServiceWorker.wrappedValue = true
 
             for fileName in fileNames {
                 print("[ServiceWorker] Worker file: \(fileName)")
